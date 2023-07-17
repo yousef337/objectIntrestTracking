@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import rospy
 from sensor_msgs.msg import LaserScan, Image
 from lasr_perception_server.srv import DetectImage
@@ -6,7 +6,8 @@ import numpy as np
 import cv2
 import mediapipe as mp
 from fer import FER
-from engagementScore.srv import engagementScore, engagementScoreRequest, engagementScoreResponse
+from engagementScore.srv import engagementScore, engagementScoreRequest, engagementScoreResponse, imgLstConverter, imgLstConverterRequest
+from PIL import Image as PILImage
 
 def getData():
     # get image 
@@ -34,28 +35,36 @@ def locateEngagedObjects(req: engagementScoreRequest):
 
     # assign them to score map
     c = 0
-    for i in resp:
-        scores[c] = {"xywh": i["xywh"], "score": 0}
+    for i in resp:            
+        scores[c] = {"xywh": i.xywh, "score": 0}
         c += 1
 
 
     # calculate face/eyes direction -> img
 
+    rospy.wait_for_service('ImgLstConverter')
+    imgConverterRes = rospy.ServiceProxy('ImgLstConverter', imgLstConverter)(img)
+    image2D = np.array(imgConverterRes.data, dtype="uint8").reshape(imgConverterRes.dimensions) #bgr8
+    EncodedImage2D = cv2.cvtColor(image2D, cv2.COLOR_BGR2RGB)
+    EncodedImage2D.flags.writeable = False
+
+    new_image = PILImage.fromarray(EncodedImage2D)
+    new_image.save(f'newMT.png')
+
     for i in scores:
-        image2D = img.data
-        np.reshape(image2D, img.height, img.width)
-        image2D[i["xywh"][0]:i["xywh"][2]][i["xywh"][1]:i["xywh"][3]]
         # detect face orientation
         mp_face_mesh = mp.solutions.face_mesh
         face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
-        #TODO: Check image encoding compatibility
-        print("Encoding bro")
-        print(img.encoding)
-        results = face_mesh.process(image2D)
+
+        r = EncodedImage2D[max(0, scores[i]["xywh"][1]):max(0, scores[i]["xywh"][1])+scores[i]["xywh"][3]+1, max(0, scores[i]["xywh"][0]):max(0, scores[i]["xywh"][0])+scores[i]["xywh"][2]+1]
+
+        new_image = PILImage.fromarray(r)
+        new_image.save(f'newMT{i}.png')
+        continue
+        results = face_mesh.process(r)
 
 
-
-        img_h, img_w, img_c = image2D.shape
+        img_h, img_w, img_c = EncodedImage2D.shape
         face_3d = []
         face_2d = []
 
@@ -106,7 +115,7 @@ def locateEngagedObjects(req: engagementScoreRequest):
             # emotions -> img
 
             detector = FER()
-            emotion = detector.top_emotion(image2D)
+            emotion = detector.top_emotion(EncodedImage2D)
 
             if emotion == "angry":
                 pass
