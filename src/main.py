@@ -8,7 +8,8 @@ import mediapipe as mp
 from fer import FER
 from engagementScore.srv import engagementScore, engagementScoreRequest, engagementScoreResponse, imgLstConverter, imgLstConverterRequest
 from PIL import Image as PILImage
-from cv_bridge3 import CvBridge
+from cv_bridge import CvBridge
+from math import sqrt, asin
 
 def getData():
     # get image 
@@ -20,11 +21,58 @@ def getData():
     return img_msg, laser_scan
 
 
-# def yawPitchRoll(faceMesh):
-#     # yaw
-#     print(faceMesh)
+def yawPitchRoll(faceMesh):
+    mesh = faceMesh.face_landmarks[0]
 
-#     return 0, 0, 0
+    # yaw
+    yaw = 0
+
+    a = sqrt(pow(mesh[50].x - mesh[18].x, 2) + pow(mesh[50].y - mesh[18].y, 2))
+    b = sqrt(pow(mesh[280].x - mesh[18].x, 2) + pow(mesh[280].y - mesh[18].y, 2))
+    c = sqrt(pow(mesh[280].x - mesh[50].x, 2) + pow(mesh[280].y - mesh[50].y, 2))
+
+    v_dist = np.linalg.norm(np.cross([mesh[280].x - mesh[50].x, mesh[280].y - mesh[50].y, mesh[280].z - mesh[50].z], [mesh[18].x - mesh[50].x, mesh[18].y - mesh[50].y, mesh[18].z - mesh[50].z]) / np.linalg.norm([mesh[280].x - mesh[50].x, mesh[280].y - mesh[50].y, mesh[280].z - mesh[50].z]))
+    lR = sqrt(pow(a, 2) - pow(v_dist, 2))
+    lL = sqrt(pow(b, 2) - pow(v_dist, 2))
+
+    yaw = asin(1-lR/lL) if a < b else asin(1-lL/lR)
+
+
+    a = sqrt(pow(mesh[50].x - mesh[4].x, 2) + pow(mesh[50].y - mesh[4].y, 2))
+    b = sqrt(pow(mesh[280].x - mesh[4].x, 2) + pow(mesh[280].y - mesh[4].y, 2))
+    
+    v_dist = np.linalg.norm(np.cross([mesh[280].x - mesh[50].x, mesh[280].y - mesh[50].y, mesh[280].z - mesh[50].z], [mesh[4].x - mesh[50].x, mesh[4].y - mesh[50].y, mesh[4].z - mesh[50].z]) / np.linalg.norm([mesh[280].x - mesh[50].x, mesh[280].y - mesh[50].y, mesh[280].z - mesh[50].z]))
+
+    # pitch
+
+    pitchL = 0
+    pitchR = 0
+
+    if b > v_dist:
+        pitchL = asin(v_dist/b)
+    elif b < v_dist:
+        pitchL = asin(b/v_dist)
+
+    if a > v_dist:
+        pitchR = asin(v_dist/a)
+    elif a < v_dist:
+        pitchR = asin(a/v_dist)
+
+    pitch = (pitchL + pitchR) / 2
+
+    # roll
+
+    a = sqrt(pow(mesh[280].x - mesh[50].x, 2) + pow(mesh[280].y - mesh[50].y, 2))
+    b = abs(mesh[280].y - mesh[50].y)
+
+    roll = 0
+
+    if b > a:
+        roll = asin(a/b)
+    elif b < a:
+        roll = asin(b/a)
+
+    return yaw, pitch, roll
 
 
 def emotionScore(score):
@@ -64,7 +112,7 @@ def locateEngagedObjects(req: engagementScoreRequest):
 
     # calculate face/eyes direction -> img
 
-    image2D = CvBridge().imgmsg_to_cv2_np(img)
+    image2D = CvBridge().imgmsg_to_cv2(img)
     EncodedImage2D = cv2.cvtColor(image2D, cv2.COLOR_BGR2RGB) # no need since _pnp will do it, here because will unuse _pnp
     EncodedImage2D.flags.writeable = False
 
@@ -78,18 +126,21 @@ def locateEngagedObjects(req: engagementScoreRequest):
         # new_image = PILImage.fromarray(r)
         # new_image.save(f'ddq{i}.png')
 
-        # BaseOptions = mp.tasks.BaseOptions
-        # FaceLandmarker = mp.tasks.vision.FaceLandmarker
-        # FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
-        # VisionRunningMode = mp.tasks.vision.RunningMode
+        BaseOptions = mp.tasks.BaseOptions
+        FaceLandmarker = mp.tasks.vision.FaceLandmarker
+        FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+        VisionRunningMode = mp.tasks.vision.RunningMode
 
-        # options = FaceLandmarkerOptions(
-        #     base_options=BaseOptions(model_asset_path=model_path),
-        #     running_mode=VisionRunningMode.IMAGE)
+        options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path="./src/engagementScore/models/face_landmarker.task"),
+            running_mode=VisionRunningMode.IMAGE)
             
-        # with FaceLandmarker.create_from_options(options) as landmarker:
-        #     face_landmarker_result = landmarker.detect(r)
-        #     yaw, pitch, roll = yawPitchRoll(face_landmarker_result)
+        with FaceLandmarker.create_from_options(options) as landmarker:
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=r)
+            face_landmarker_result = landmarker.detect(mp_image)
+            yaw, pitch, roll = yawPitchRoll(face_landmarker_result)
+            print("Angles")
+            print(yaw, pitch, roll)
 
 
         # emotions -> img
@@ -98,8 +149,8 @@ def locateEngagedObjects(req: engagementScoreRequest):
         emotion = detector.top_emotion(r)
         scores[i]['score'] += emotionScore(emotion[0])
 
-    print(scores[max(scores, key=lambda x: scores[x]['score'])])
-    print(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
+    # print(scores)
+    # print(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
     res = engagementScoreResponse()
     res.dimensions = list(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
     return res

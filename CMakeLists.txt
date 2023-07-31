@@ -8,12 +8,12 @@ project(engagementScore)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  roscpp
-  rospy
-  std_msgs
-  message_generation
   geometry_msgs
+  message_generation
+  message_runtime
+  rospy
   sensor_msgs
+  std_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -110,7 +110,7 @@ generate_messages(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES engagementScore
-  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime
+ CATKIN_DEPENDS geometry_msgs message_generation message_runtime rospy sensor_msgs std_msgs
 #  DEPENDS system_lib
 )
 
@@ -138,7 +138,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/engagementScore.cpp)
+# add_executable(${PROJECT_NAME}_node src/engagementScore_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
