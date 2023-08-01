@@ -89,6 +89,18 @@ def emotionScore(score):
     return a.get(score, 0)
 
 
+def distractionScore(distraction):
+    a = {
+        "ipad" : -0.6,
+        "tablet": -0.6,
+        "phone" : -0.5,
+        "mobile" : -0.5,
+        "laptop" : -0.7,
+        "computer": -0.75
+    }
+
+    return a.get(distraction, 0)
+
 def angleScore(angle):
     return angle*-1/5 + 2
 
@@ -157,6 +169,16 @@ def locateEngagedObjects(req: engagementScoreRequest):
         if emotion:
             scores[i]['score'] += emotionScore(emotion[0])
 
+
+        # distraction detection -> img
+        r_imgmsg = CvBridge().cv2_to_imgmsg(r, encoding="passthrough")
+        distractionResp = objectRecognitionService(
+                [r_imgmsg], 'coco', 0.7, 0.3, ["ipad", "tablet", "phone", "mobile", "laptop", "computer"], 'yolo'
+            ).detected_objects
+        
+        for d in distractionResp:
+            scores[i]['score'] += distractionScore(d.name)
+
     # print(scores)
     # print(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
     res = engagementScoreResponse()
@@ -164,8 +186,6 @@ def locateEngagedObjects(req: engagementScoreRequest):
     if len(scores) != 0:
         res.dimensions = list(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
     
-    # distraction detection -> img & laser
-
     return res
 
 
