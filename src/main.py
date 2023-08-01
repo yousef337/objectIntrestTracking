@@ -86,7 +86,11 @@ def emotionScore(score):
         "neutral" : 2,
     }
 
-    return a[score]
+    return a.get(score, 0)
+
+
+def angleScore(angle):
+    return angle*-1/5 + 2
 
 def locateEngagedObjects(req: engagementScoreRequest):
 
@@ -132,30 +136,38 @@ def locateEngagedObjects(req: engagementScoreRequest):
         VisionRunningMode = mp.tasks.vision.RunningMode
 
         options = FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path="./src/engagementScore/models/face_landmarker.task"),
+            base_options=BaseOptions(model_asset_path="./src/engagmentScore/models/face_landmarker.task"),
             running_mode=VisionRunningMode.IMAGE)
             
         with FaceLandmarker.create_from_options(options) as landmarker:
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=r)
             face_landmarker_result = landmarker.detect(mp_image)
-            yaw, pitch, roll = yawPitchRoll(face_landmarker_result)
-            print("Angles")
-            print(yaw, pitch, roll)
+
+            if len(face_landmarker_result.face_landmarks):
+                yaw, pitch, roll = yawPitchRoll(face_landmarker_result)
+                scores[i]['score'] += angleScore(yaw)
+                scores[i]['score'] += angleScore(pitch)
+
 
 
         # emotions -> img
 
         detector = FER()
         emotion = detector.top_emotion(r)
-        scores[i]['score'] += emotionScore(emotion[0])
+        if emotion:
+            scores[i]['score'] += emotionScore(emotion[0])
 
     # print(scores)
     # print(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
     res = engagementScoreResponse()
-    res.dimensions = list(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
+    
+    if len(scores) != 0:
+        res.dimensions = list(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
+    
+    # distraction detection -> img & laser
+
     return res
 
-    # distraction detection -> img & laser
 
 
 rospy.init_node("objectEngagementTracking")
