@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 import rospy
-from sensor_msgs.msg import LaserScan, Image
-from lasr_perception_server.srv import DetectImage
 import numpy as np
 import cv2
 import mediapipe as mp
+from sensor_msgs.msg import LaserScan, Image
+from lasr_perception_server.srv import DetectImage
 from fer import FER
-from engagementScore.srv import engagementScore, engagementScoreRequest, engagementScoreResponse, imgLstConverter, imgLstConverterRequest
+from engagementScore.srv import engagementScore, engagementScoreRequest, engagementScoreResponse
 from PIL import Image as PILImage
 from cv_bridge import CvBridge
 from math import sqrt, asin
+from settings import MEDIAPIPE_MODEL_PATH, ANGLE_SCORE
 
 def getData():
-    # get image 
     img_msg = rospy.wait_for_message('/xtion/rgb/image_raw', Image)
-
-    # get laser reading
     laser_scan = ""#rospy.wait_for_message('/scan_raw', LaserScan)
 
     return img_msg, laser_scan
@@ -102,7 +100,44 @@ def distractionScore(distraction):
     return a.get(distraction, 0)
 
 def angleScore(angle):
-    return angle*-1/5 + 2
+    return ANGLE_SCORE(angle)
+
+
+def scoreEmotion(scores, r, i):
+    detector = FER()
+    emotion = detector.top_emotion(r)
+    if emotion:
+        scores[i]['score'] += emotionScore(emotion[0])
+
+
+def scoreDistraction(scores, r, i, cvBridge, objectRecognitionService):
+    r_imgmsg = cvBridge.cv2_to_imgmsg(r, encoding="passthrough")
+    distractionResp = objectRecognitionService(
+            [r_imgmsg], 'coco', 0.7, 0.3, ["ipad", "tablet", "phone", "mobile", "laptop", "computer"], 'yolo'
+        ).detected_objects
+    
+    for d in distractionResp:
+        scores[i]['score'] += distractionScore(d.name)
+
+def scoreHeadPosition(scores, r, i):
+    BaseOptions = mp.tasks.BaseOptions
+    FaceLandmarker = mp.tasks.vision.FaceLandmarker
+    FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+    VisionRunningMode = mp.tasks.vision.RunningMode
+
+    options = FaceLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=MEDIAPIPE_MODEL_PATH),
+        running_mode=VisionRunningMode.IMAGE)
+        
+    with FaceLandmarker.create_from_options(options) as landmarker:
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=r)
+        face_landmarker_result = landmarker.detect(mp_image)
+
+        if len(face_landmarker_result.face_landmarks):
+            yaw, pitch, roll = yawPitchRoll(face_landmarker_result)
+            scores[i]['score'] += angleScore(yaw)
+            scores[i]['score'] += angleScore(pitch)
+
 
 def locateEngagedObjects(req: engagementScoreRequest):
 
@@ -126,61 +161,23 @@ def locateEngagedObjects(req: engagementScoreRequest):
         c += 1
 
 
-    # calculate face/eyes direction -> img
-
-    image2D = CvBridge().imgmsg_to_cv2(img)
-    EncodedImage2D = cv2.cvtColor(image2D, cv2.COLOR_BGR2RGB) # no need since _pnp will do it, here because will unuse _pnp
+    cvBridge = CvBridge()
+    image2D = cvBridge.imgmsg_to_cv2(img)
+    EncodedImage2D = cv2.cvtColor(image2D, cv2.COLOR_BGR2RGB)
     EncodedImage2D.flags.writeable = False
 
     # new_image = PILImage.fromarray(EncodedImage2D)
     # new_image.save(f'newMTr.png')
 
     for i in scores:
-        # detect face orientation
         r = EncodedImage2D[max(0, scores[i]["xywh"][1]):max(0, scores[i]["xywh"][1])+scores[i]["xywh"][3]+1, max(0, scores[i]["xywh"][0]):max(0, scores[i]["xywh"][0])+scores[i]["xywh"][2]+1]
         r = r.copy(order='c')
-        # new_image = PILImage.fromarray(r)
-        # new_image.save(f'ddq{i}.png')
 
-        BaseOptions = mp.tasks.BaseOptions
-        FaceLandmarker = mp.tasks.vision.FaceLandmarker
-        FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
-        VisionRunningMode = mp.tasks.vision.RunningMode
-
-        options = FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path="./src/engagmentScore/models/face_landmarker.task"),
-            running_mode=VisionRunningMode.IMAGE)
-            
-        with FaceLandmarker.create_from_options(options) as landmarker:
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=r)
-            face_landmarker_result = landmarker.detect(mp_image)
-
-            if len(face_landmarker_result.face_landmarks):
-                yaw, pitch, roll = yawPitchRoll(face_landmarker_result)
-                scores[i]['score'] += angleScore(yaw)
-                scores[i]['score'] += angleScore(pitch)
+        scoreHeadPosition(scores, r, i)
+        scoreEmotion(scores, r, i)
+        scoreDistraction(scores, r, i, cvBridge, objectRecognitionService)
 
 
-
-        # emotions -> img
-
-        detector = FER()
-        emotion = detector.top_emotion(r)
-        if emotion:
-            scores[i]['score'] += emotionScore(emotion[0])
-
-
-        # distraction detection -> img
-        r_imgmsg = CvBridge().cv2_to_imgmsg(r, encoding="passthrough")
-        distractionResp = objectRecognitionService(
-                [r_imgmsg], 'coco', 0.7, 0.3, ["ipad", "tablet", "phone", "mobile", "laptop", "computer"], 'yolo'
-            ).detected_objects
-        
-        for d in distractionResp:
-            scores[i]['score'] += distractionScore(d.name)
-
-    # print(scores)
-    # print(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
     res = engagementScoreResponse()
     
     if len(scores) != 0:
