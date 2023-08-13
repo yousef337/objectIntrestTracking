@@ -3,6 +3,7 @@ import rospy
 import numpy as np
 import cv2
 import mediapipe as mp
+import uuid
 from sensor_msgs.msg import LaserScan, Image
 from lasr_perception_server.srv import DetectImage
 from fer import FER
@@ -10,7 +11,12 @@ from engagementScore.srv import engagementScore, engagementScoreRequest, engagem
 from PIL import Image as PILImage
 from cv_bridge import CvBridge
 from math import sqrt, asin
-from settings import MEDIAPIPE_MODEL_PATH, ANGLE_SCORE
+from settings import MEDIAPIPE_MODEL_PATH, ANGLE_SCORE, DISCOUNT_FACTOR
+
+
+mem = {}
+mappings = {}
+prevImg = {}
 
 def getData():
     img_msg = rospy.wait_for_message('/xtion/rgb/image_raw', Image)
@@ -139,6 +145,41 @@ def scoreHeadPosition(scores, r, i):
             scores[i]['score'] += angleScore(pitch)
 
 
+def record():
+    global mem
+    global prevImg
+
+    newId = str(uuid.uuid4())
+    while newId in mem.keys():
+        newId = uuid.uuid4()
+    mem[newId] = []    
+    return newId
+
+def linkMapping(currentImg, scores, id):
+    global mappings
+    global mem
+    global prevImg
+
+    prevImgData = prevImg[id]
+    currentFaces = []
+    previousFaces = []
+
+    print("=====")
+    print(mem[id][-1])
+    print(scores)
+
+    for i in mem[id][-1]:
+        print(i)
+        r = prevImgData[max(0, i["xywh"][1]):max(0, i["xywh"][1])+i["xywh"][3]+1, max(0, i["xywh"][0]):max(0, i["xywh"][0])+i["xywh"][2]+1]
+        previousFaces.append({id: i, img: r})
+
+    for i in scores:
+        r = currentImg[max(0, i["xywh"][1]):max(0, i["xywh"][1])+i["xywh"][3]+1, max(0, i["xywh"][0]):max(0, i["xywh"][0])+i["xywh"][2]+1]
+        currentFaces.append({id: i, img: r})
+
+    for i in currentFaces:
+        pass
+
 def locateEngagedObjects(req: engagementScoreRequest):
 
     img, laserReading = getData()
@@ -177,11 +218,58 @@ def locateEngagedObjects(req: engagementScoreRequest):
         scoreEmotion(scores, r, i)
         scoreDistraction(scores, r, i, cvBridge, objectRecognitionService)
 
+    # Apply past learning for scores 
+
+    global mem
+    global mappings
+    global prevImg
+
+    id = req.id
+    if id == "":
+        id = record()
+        dic = {}
+
+        for j in scores:
+            print("----j")
+            print(j)
+            dic[j] = [scores[j]]
+        
+        mappings[id] = dic
+
+    else:
+        print(mappings)
+        for j in mappings[id].keys():
+            mappings[id][j].append(linkMapping(EncodedImage2D, scores, id))
+
+    mem[id].append(scores)
+    prevImg[id] = EncodedImage2D
+
+
+    adjustedScores = scores.copy()
+
+    for i in adjustedScores.keys():
+        score = 0
+        degree = 1
+        print("-----")
+        print(mem[id])
+        print(mappings[id])
+
+        for j in mem[id]: #TODO: invert this to start from mappings, remove dependency on i below
+            print(j)
+            print(mappings[id][i][degree - 1]['score'])
+            score += mappings[id][i][degree - 1]['score'] * pow(DISCOUNT_FACTOR, degree - 1)
+            degree += 1
+        
+        adjustedScores[i]['score'] = score
+
 
     res = engagementScoreResponse()
-    
-    if len(scores) != 0:
-        res.dimensions = list(scores[max(scores, key=lambda x: scores[x]['score'])]['xywh'])
+
+    res.id = str(id)
+    print("---------------adjustedScores")
+    print(adjustedScores)
+    if len(adjustedScores) != 0:
+        res.dimensions = list(adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]['xywh'])
     
     return res
 

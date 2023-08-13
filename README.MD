@@ -20,7 +20,7 @@ Add memory to continuous engage
 
 Add distance and the change in distance to the scoring pipeline
 
-Add disengage policy 
+Add disengage policy
 
 # References
 
