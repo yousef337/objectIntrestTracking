@@ -11,6 +11,7 @@ from engagementScore.srv import engagementScore, engagementScoreRequest, engagem
 from PIL import Image as PILImage
 from cv_bridge import CvBridge
 from math import sqrt, asin
+from face_comparison.srv import faceSimilarity, faceSimilarityRequest, faceSimilarityResponse
 from settings import MEDIAPIPE_MODEL_PATH, ANGLE_SCORE, DISCOUNT_FACTOR
 
 
@@ -155,7 +156,7 @@ def record():
     mem[newId] = []    
     return newId
 
-def linkMapping(currentImg, scores, id):
+def linkMapping(currentImg, scores, id, cvBridge):
     global mappings
     global mem
     global prevImg
@@ -164,22 +165,44 @@ def linkMapping(currentImg, scores, id):
     currentFaces = []
     previousFaces = []
 
-    print("=====")
-    print(mem[id][-1])
-    print(scores)
+    # print("--------------")
+    # print(mem[id])
+    # print(scores)
+
+    #TODO: if someone move from the image, add them to the memory with negative impact
 
     for i in mem[id][-1]:
-        print(i)
-        r = prevImgData[max(0, i["xywh"][1]):max(0, i["xywh"][1])+i["xywh"][3]+1, max(0, i["xywh"][0]):max(0, i["xywh"][0])+i["xywh"][2]+1]
-        previousFaces.append({id: i, img: r})
+        v = mem[id][-1][i]
+        r = prevImgData[max(0, v["xywh"][1]):max(0, v["xywh"][1])+v["xywh"][3]+1, max(0, v["xywh"][0]):max(0, v["xywh"][0])+v["xywh"][2]+1]
+        # print("=====")
+        # print(i)
+        # print(v)
+        previousFaces.append({"id": i, "img": r})
 
     for i in scores:
-        r = currentImg[max(0, i["xywh"][1]):max(0, i["xywh"][1])+i["xywh"][3]+1, max(0, i["xywh"][0]):max(0, i["xywh"][0])+i["xywh"][2]+1]
-        currentFaces.append({id: i, img: r})
+        # print("---------i")
+        # print(i)
+        v = scores[i]
+        r = currentImg[max(0, v["xywh"][1]):max(0, v["xywh"][1])+v["xywh"][3]+1, max(0, v["xywh"][0]):max(0, v["xywh"][0])+v["xywh"][2]+1]
+        currentFaces.append({"id": i, "img": r})
 
+
+    rospy.wait_for_service('/FaceSimilarity')
+    faceSimilarityService = rospy.ServiceProxy('/FaceSimilarity', faceSimilarity)
+    
+    print('-------------------ij')
     for i in currentFaces:
-        pass
-
+        highest = (None, 0)
+        for j in previousFaces:
+            res = faceSimilarityService(cvBridge.cv2_to_imgmsg(i['img'], encoding="passthrough"), cvBridge.cv2_to_imgmsg(j['img'], encoding="passthrough"))
+            print(res)
+            if highest[1] < res.similar:
+                highest = (j['id'], res.similar)
+        
+        print(mappings[id])
+        #TODO: if highest is None
+        mappings[id][highest[0]].append(i['id'])
+            
 def locateEngagedObjects(req: engagementScoreRequest):
 
     img, laserReading = getData()
@@ -224,6 +247,8 @@ def locateEngagedObjects(req: engagementScoreRequest):
     global mappings
     global prevImg
 
+    #TODO: if supplied with non-existing id
+    #TODO: Address if first dict is none
     id = req.id
     if id == "":
         id = record()
@@ -236,10 +261,9 @@ def locateEngagedObjects(req: engagementScoreRequest):
         
         mappings[id] = dic
 
-    else:
-        print(mappings)
-        for j in mappings[id].keys():
-            mappings[id][j].append(linkMapping(EncodedImage2D, scores, id))
+    elif scores:
+            for j in mappings[id].keys():
+                mappings[id][j].append(linkMapping(EncodedImage2D, scores, id, cvBridge))
 
     mem[id].append(scores)
     prevImg[id] = EncodedImage2D
@@ -254,7 +278,7 @@ def locateEngagedObjects(req: engagementScoreRequest):
         print(mem[id])
         print(mappings[id])
 
-        for j in mem[id]: #TODO: invert this to start from mappings, remove dependency on i below
+        for j in mem[id]: #TODO: invert this to start from mappings, remove dependency on i below, and remove if a person not in frame
             print(j)
             print(mappings[id][i][degree - 1]['score'])
             score += mappings[id][i][degree - 1]['score'] * pow(DISCOUNT_FACTOR, degree - 1)
