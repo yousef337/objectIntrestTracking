@@ -1,4 +1,5 @@
 string id
 ---
 string id
+float32 score
 int32[] dimensions

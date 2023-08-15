@@ -324,7 +324,9 @@ def locateEngagedObjects(req: engagementScoreRequest):
     # print(adjustedScores)
 
     if len(adjustedScores) != 0:
-        res.dimensions = list(adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]['xywh'])
+        highestScore = adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]
+        res.dimensions = list(highestScore['xywh'])
+        res.score = highestScore['score']
     
     return res
 
