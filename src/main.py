@@ -169,7 +169,7 @@ def linkMapping(currentImg, scores, id, cvBridge):
     # print(mem[id])
     # print(scores)
 
-    #TODO: if someone move from the image, add them to the memory with negative impact
+    #TODO: if someone move from the image, add them to the memory with negative impact, or don't and penalize them in the inverted search and eliminate them if not in last image
 
     for i in mem[id][-1]:
         v = mem[id][-1][i]
@@ -196,6 +196,7 @@ def linkMapping(currentImg, scores, id, cvBridge):
         for j in previousFaces:
             res = faceSimilarityService(cvBridge.cv2_to_imgmsg(i['img'], encoding="passthrough"), cvBridge.cv2_to_imgmsg(j['img'], encoding="passthrough"))
             print(res)
+            #TODO: if res.isSimilar????
             if highest[1] < res.similar:
                 highest = (j['id'], res.similar)
         
@@ -292,6 +293,7 @@ def locateEngagedObjects(req: engagementScoreRequest):
     res.id = str(id)
     print("---------------adjustedScores")
     print(adjustedScores)
+    #TODO: add disengagement if less than a score
     if len(adjustedScores) != 0:
         res.dimensions = list(adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]['xywh'])
     
