@@ -21,9 +21,9 @@ prevImg = {}
 
 def getData():
     img_msg = rospy.wait_for_message('/xtion/rgb/image_raw', Image)
-    laser_scan = ""#rospy.wait_for_message('/scan_raw', LaserScan)
+    img_depth_msg = rospy.wait_for_message('/xtion/depth/image_raw', Image)
 
-    return img_msg, laser_scan
+    return img_msg, img_depth_msg
 
 
 def yawPitchRoll(faceMesh):
@@ -222,10 +222,12 @@ def linkMapping(currentImg, scores, id, cvBridge):
             mappings[id][i].append(-1)
 
 
+def getDepth(imgDepth, personFrame):
+    return imgDepth[int(personFrame[0] + personFrame[2]/2)][int(personFrame[1] + personFrame[1]/2)]
 
 def locateEngagedObjects(req: engagementScoreRequest):
 
-    img, laserReading = getData()
+    img, imgDepth = getData()
     scores = {}
 
     # detect ppl -> img
@@ -314,6 +316,7 @@ def locateEngagedObjects(req: engagementScoreRequest):
             score += mem[id][j][mappings[id][i][j]]['score'] * pow(DISCOUNT_FACTOR, degree - 1)
 
         
+
         adjustedScores[i] = {"xywh": mem[id][i][len(mem[id][i])-1]['xywh'], "score": score}
 
 
@@ -327,7 +330,9 @@ def locateEngagedObjects(req: engagementScoreRequest):
         highestScore = adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]
         res.dimensions = list(highestScore['xywh'])
         res.score = highestScore['score']
-    
+        res.depth = getDepth(cvBridge.imgmsg_to_cv2(imgDepth), res.dimensions)
+
+
     return res
 
 
