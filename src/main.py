@@ -169,8 +169,6 @@ def linkMapping(currentImg, scores, id, cvBridge):
     # print(mem[id])
     # print(scores)
 
-    #TODO: if someone move from the image, add them to the memory with negative impact, or don't and penalize them in the inverted search and eliminate them if not in last image
-
     for i in mem[id][-1]:
         v = mem[id][-1][i]
         r = prevImgData[max(0, v["xywh"][1]):max(0, v["xywh"][1])+v["xywh"][3]+1, max(0, v["xywh"][0]):max(0, v["xywh"][0])+v["xywh"][2]+1]
@@ -178,6 +176,7 @@ def linkMapping(currentImg, scores, id, cvBridge):
         # print(i)
         # print(v)
         previousFaces.append({"id": i, "img": r})
+
 
     for i in scores:
         # print("---------i")
@@ -190,20 +189,40 @@ def linkMapping(currentImg, scores, id, cvBridge):
     rospy.wait_for_service('/FaceSimilarity')
     faceSimilarityService = rospy.ServiceProxy('/FaceSimilarity', faceSimilarity)
     
-    print('-------------------ij')
+    faceIds = []
+
     for i in currentFaces:
         highest = (None, 0)
         for j in previousFaces:
             res = faceSimilarityService(cvBridge.cv2_to_imgmsg(i['img'], encoding="passthrough"), cvBridge.cv2_to_imgmsg(j['img'], encoding="passthrough"))
-            print(res)
-            #TODO: if res.isSimilar????
+            # print("-----res")
+            # print(res)
+
             if highest[1] < res.similar:
                 highest = (j['id'], res.similar)
+            print(highest)
         
-        print(mappings[id])
-        #TODO: if highest is None
-        mappings[id][highest[0]].append(i['id'])
-            
+        if (highest[0] != None):
+            mappings[id][highest[0]].append(i['id'])
+            faceIds.append(i['id'])
+        else:
+            a = len(mappings[id])
+            mappings[id][a] = [a]
+            faceIds.append(a)
+
+
+    #TODO: (FEATURE NOT A BUG) if prev disappeared and returned it will be treated as new score
+
+    # print("0000000000")
+    # print(mappings)
+    # print(faceIds)
+    for i in mappings[id].keys():
+        print(i)
+        if i not in faceIds:
+            mappings[id][i].append(-1)
+
+
+
 def locateEngagedObjects(req: engagementScoreRequest):
 
     img, laserReading = getData()
@@ -248,52 +267,62 @@ def locateEngagedObjects(req: engagementScoreRequest):
     global mappings
     global prevImg
 
-    #TODO: if supplied with non-existing id
-    #TODO: Address if first dict is none
+
     id = req.id
-    if id == "":
+
+    if not scores:
+         return engagementScoreResponse()
+
+    if id == "" or id not in mem.keys():
         id = record()
         dic = {}
 
         for j in scores:
-            print("----j")
-            print(j)
-            dic[j] = [scores[j]]
+            # print("----j")
+            # print(scores)
+            # print(j)
+            dic[j] = [j]
         
         mappings[id] = dic
 
     elif scores:
-            for j in mappings[id].keys():
-                mappings[id][j].append(linkMapping(EncodedImage2D, scores, id, cvBridge))
+        linkMapping(EncodedImage2D, scores, id, cvBridge)
 
     mem[id].append(scores)
     prevImg[id] = EncodedImage2D
 
 
-    adjustedScores = scores.copy()
+    adjustedScores = {}
+    #TODO: after inversion, eliminate those who aren't in last frame
+    #TODO: invert this to start from mappings, remove dependency on i below, and remove if a person not in frame
 
-    for i in adjustedScores.keys():
+    # print("========================")
+    # print(mappings[id])
+    # print(mem[id])
+
+    for i in mappings[id].keys():
+        if mappings[id][i][-1] == -1:
+            continue
+
         score = 0
         degree = 1
-        print("-----")
-        print(mem[id])
-        print(mappings[id])
 
-        for j in mem[id]: #TODO: invert this to start from mappings, remove dependency on i below, and remove if a person not in frame
-            print(j)
-            print(mappings[id][i][degree - 1]['score'])
-            score += mappings[id][i][degree - 1]['score'] * pow(DISCOUNT_FACTOR, degree - 1)
-            degree += 1
+        for j in range(len(mappings[id][i])):
+            # print(mem[id][j])
+            # print(mappings[id][i][j])
+            # print(mem[id][j][mappings[id][i][j]])
+            score += mem[id][j][mappings[id][i][j]]['score'] * pow(DISCOUNT_FACTOR, degree - 1)
+
         
-        adjustedScores[i]['score'] = score
+        adjustedScores[i] = {"xywh": mem[id][i][len(mem[id][i])-1]['xywh'], "score": score}
 
 
     res = engagementScoreResponse()
 
     res.id = str(id)
-    print("---------------adjustedScores")
-    print(adjustedScores)
-    #TODO: add disengagement if less than a score
+    # print("---------------adjustedScores")
+    # print(adjustedScores)
+
     if len(adjustedScores) != 0:
         res.dimensions = list(adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]['xywh'])
     

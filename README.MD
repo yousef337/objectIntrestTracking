@@ -16,11 +16,10 @@ The current scoring takes into account emotions, head position, and availability
 
 
 # Future updates (todo list)
-Add memory to continuous engage
 
 Add distance and the change in distance to the scoring pipeline
 
-Add disengage policy
+Add gesture detection
 
 # References
 
