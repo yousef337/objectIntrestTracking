@@ -1,6 +1,8 @@
 string id
+float32 viewAngle
 ---
 string id
 float32 score
 float32 depth
+float32 angle
 int32[] dimensions

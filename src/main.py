@@ -225,6 +225,13 @@ def linkMapping(currentImg, scores, id, cvBridge):
 def getDepth(imgDepth, personFrame):
     return imgDepth[int(personFrame[0] + personFrame[2]/2)][int(personFrame[1] + personFrame[1]/2)]
 
+def getAngle(img, personFrame, viewAngle):
+    yawPix = viewAngle/len(img[0])
+    personsAngle = (len(img[0]) - personFrame[0] - personFrame[2]/2) * yawPix
+    movingAngle = personsAngle - viewAngle/2
+
+    return movingAngle * -1 if personFrame[0] + personFrame[2]/2 > len(img[0])/2 else movingAngle
+
 def locateEngagedObjects(req: engagementScoreRequest):
 
     img, imgDepth = getData()
@@ -295,8 +302,6 @@ def locateEngagedObjects(req: engagementScoreRequest):
 
 
     adjustedScores = {}
-    #TODO: after inversion, eliminate those who aren't in last frame
-    #TODO: invert this to start from mappings, remove dependency on i below, and remove if a person not in frame
 
     # print("========================")
     # print(mappings[id])
@@ -330,7 +335,9 @@ def locateEngagedObjects(req: engagementScoreRequest):
         highestScore = adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]
         res.dimensions = list(highestScore['xywh'])
         res.score = highestScore['score']
-        res.depth = getDepth(cvBridge.imgmsg_to_cv2(imgDepth), res.dimensions)
+        depthImg = cvBridge.imgmsg_to_cv2(imgDepth)
+        res.depth = getDepth(depthImg, res.dimensions)
+        res.angle = getAngle(image2D, res.dimensions, req.viewAngle)
 
 
     return res
