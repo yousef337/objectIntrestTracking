@@ -12,7 +12,7 @@ from PIL import Image as PILImage
 from cv_bridge import CvBridge
 from math import sqrt, asin
 from face_comparison.srv import faceSimilarity, faceSimilarityRequest, faceSimilarityResponse
-from settings import MEDIAPIPE_MODEL_PATH, ANGLE_SCORE, DISCOUNT_FACTOR
+from settings import MEDIAPIPE_MODEL_PATH, ANGLE_SCORE, DEPTH_CHANGE_SCORE, DISCOUNT_FACTOR
 
 
 mem = {}
@@ -109,6 +109,16 @@ def distractionScore(distraction):
 def angleScore(angle):
     return ANGLE_SCORE(angle)
 
+def depthChangeScore(previousDepth, newDepth):
+    return DEPTH_CHANGE_SCORE(newDepth - previousDepth)
+
+def scoreChangeInDepth(scores, i, j, id):
+    global mem
+    if (len(mem[id]) > 1 and len(mem[id][i]) > 1):
+        global mappings
+        previousDepth = mem[id][i][-2]['depth']
+        currentDepth = mem[id][i][-1]['depth']
+        scores[j]['score'] += depthChangeScore(previousDepth, currentDepth)
 
 def scoreEmotion(scores, r, i):
     detector = FER()
@@ -155,6 +165,7 @@ def record():
         newId = uuid.uuid4()
     mem[newId] = []    
     return newId
+
 
 def linkMapping(currentImg, scores, id, cvBridge):
     global mappings
@@ -232,9 +243,12 @@ def getAngle(img, personFrame, viewAngle):
 
     return movingAngle * -1 if personFrame[0] + personFrame[2]/2 > len(img[0])/2 else movingAngle
 
+
 def locateEngagedObjects(req: engagementScoreRequest):
 
     img, imgDepth = getData()
+    cvBridge = CvBridge()
+    depthImg = cvBridge.imgmsg_to_cv2(imgDepth)
     scores = {}
 
     # detect ppl -> img
@@ -250,11 +264,10 @@ def locateEngagedObjects(req: engagementScoreRequest):
     # assign them to score map
     c = 0
     for i in resp:            
-        scores[c] = {"xywh": i.xywh, "score": 0}
+        scores[c] = {"xywh": i.xywh, "score": 0, "depth": getDepth(depthImg, i.xywh)}
         c += 1
 
 
-    cvBridge = CvBridge()
     image2D = cvBridge.imgmsg_to_cv2(img)
     EncodedImage2D = cv2.cvtColor(image2D, cv2.COLOR_BGR2RGB)
     EncodedImage2D.flags.writeable = False
@@ -262,13 +275,6 @@ def locateEngagedObjects(req: engagementScoreRequest):
     # new_image = PILImage.fromarray(EncodedImage2D)
     # new_image.save(f'newMTr.png')
 
-    for i in scores:
-        r = EncodedImage2D[max(0, scores[i]["xywh"][1]):max(0, scores[i]["xywh"][1])+scores[i]["xywh"][3]+1, max(0, scores[i]["xywh"][0]):max(0, scores[i]["xywh"][0])+scores[i]["xywh"][2]+1]
-        r = r.copy(order='c')
-
-        scoreHeadPosition(scores, r, i)
-        scoreEmotion(scores, r, i)
-        scoreDistraction(scores, r, i, cvBridge, objectRecognitionService)
 
     # Apply past learning for scores 
 
@@ -294,8 +300,22 @@ def locateEngagedObjects(req: engagementScoreRequest):
         
         mappings[id] = dic
 
-    elif scores:
+    else:
         linkMapping(EncodedImage2D, scores, id, cvBridge)
+
+
+    for i in mappings[id].keys():
+        if mappings[id][i][-1] == -1:
+            continue
+
+        j = mappings[id][i][-1]
+
+        r = EncodedImage2D[max(0, scores[j]["xywh"][1]):max(0, scores[j]["xywh"][1])+scores[j]["xywh"][3]+1, max(0, scores[j]["xywh"][0]):max(0, scores[j]["xywh"][0])+scores[j]["xywh"][2]+1]
+        r = r.copy(order='c')
+        scoreHeadPosition(scores, r, j)
+        scoreEmotion(scores, r, j)
+        scoreDistraction(scores, r, j, cvBridge, objectRecognitionService)
+        scoreChangeInDepth(scores, i, j, id)
 
     mem[id].append(scores)
     prevImg[id] = EncodedImage2D
@@ -335,7 +355,6 @@ def locateEngagedObjects(req: engagementScoreRequest):
         highestScore = adjustedScores[max(adjustedScores, key=lambda x: adjustedScores[x]['score'])]
         res.dimensions = list(highestScore['xywh'])
         res.score = highestScore['score']
-        depthImg = cvBridge.imgmsg_to_cv2(imgDepth)
         res.depth = getDepth(depthImg, res.dimensions)
         res.angle = getAngle(image2D, res.dimensions, req.viewAngle)
 
