@@ -263,9 +263,11 @@ def locateEngagedObjects(req: engagementScoreRequest):
 
     # assign them to score map
     c = 0
-    for i in resp:            
-        scores[c] = {"xywh": i.xywh, "score": 0, "depth": getDepth(depthImg, i.xywh)}
-        c += 1
+    for i in resp:
+        personsDepth = getDepth(depthImg, i.xywh)
+        if personsDepth < req.maxDepth:     
+            scores[c] = {"xywh": i.xywh, "score": 0, "depth": personsDepth}
+            c += 1
 
 
     image2D = cvBridge.imgmsg_to_cv2(img)

@@ -1,5 +1,6 @@
 string id
 float32 viewAngle
+float32 maxDepth
 ---
 string id
 float32 score
